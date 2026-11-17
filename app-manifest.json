@@ -1,0 +1,73 @@
+{
+  "name": "kuson_globe_compare",
+  "displayName": "Kuson Globe Compare",
+  "version": "1.0.0",
+  "repository": "https://github.com/kuson/kuson_globe_compare",
+  "workspacePath": "/Volumes/ExtremeProApple/dev/2026/kuson_globe_compare",
+  "conversationId": "47e2c7d6-e449-4f42-98ce-b45e24fb2738",
+  "defaultDraggedCountry": {
+    "id": "764",
+    "iso3": "THA",
+    "name": "Thailand"
+  },
+  "defaultInitialTarget": {
+    "id": "250",
+    "iso3": "FRA",
+    "name": "France",
+    "lng": 2.8,
+    "lat": 46.8,
+    "rotationDeg": 0
+  },
+  "techStack": {
+    "framework": "React 18 + TypeScript + Vite 6",
+    "styling": "Tailwind CSS 3 + Glassmorphic HUD",
+    "rendering3D": "Three.js (WebGLRenderer, Custom Fresnel Atmosphere Shader, 3D Extruded Prisms)",
+    "sphericalGeometry": "d3-geo + topojson-client + world-atlas (countries-110m.json)"
+  },
+  "globeLayers": [
+    "geographic",
+    "terrain",
+    "political",
+    "night",
+    "choropleth",
+    "hologram"
+  ],
+  "choroplethMetrics": [
+    "gdpPerCapita",
+    "populationDensity",
+    "gdpNominalB",
+    "hdi",
+    "areaKm2"
+  ],
+  "urlDeepLinkParams": {
+    "drag": "ISO-3166-1 numeric string of superimposed country (default '764')",
+    "target": "Optional ISO-3166-1 numeric string of pinned underlying country",
+    "lng": "Float longitude (-180 to 180)",
+    "lat": "Float latitude (-85 to 85)",
+    "rot": "Integer compass bearing rotation (0 to 359)",
+    "layer": "GlobeLayerId ('geographic' | 'terrain' | 'political' | 'night' | 'choropleth' | 'hologram')"
+  },
+  "entryPoints": {
+    "html": "index.html",
+    "main": "src/main.tsx",
+    "app": "src/App.tsx",
+    "globe3D": "src/components/Globe3D.tsx",
+    "comparisonPanel": "src/components/ComparisonPanel.tsx",
+    "sharePosterModal": "src/components/SharePosterModal.tsx",
+    "sphericalMath": "src/utils/sphericalMath.ts",
+    "globeTextures": "src/utils/globeTextures.ts",
+    "countryDatabase": "src/data/countryDatabase.ts",
+    "handoff": "HANDOFF.md"
+  },
+  "scripts": {
+    "dev": "npm run dev",
+    "build": "npm run build",
+    "preview": "npm run preview"
+  },
+  "verification": {
+    "typecheckAndBuild": "passed",
+    "browserViewportTested": "1440x900",
+    "consoleErrors": 0,
+    "networkErrors": 0
+  }
+}
