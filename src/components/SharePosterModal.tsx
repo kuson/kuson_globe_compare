@@ -53,6 +53,8 @@ export const SharePosterModal: React.FC<SharePosterModalProps> = ({
     return url.toString();
   })();
 
+  const statsAreCurated =
+    d.dataQuality !== 'estimated' && (!t || t.dataQuality !== 'estimated');
   const shareSummaryText = t
     ? `🌍 Kuson Globe Compare: ${d.flag} ${d.name} (${d.areaKm2.toLocaleString()} km²) superimposed over ${t.flag} ${t.name} (${t.areaKm2.toLocaleString()} km²)!\n\n` +
       `• True Spherical Scale: ${d.name} is ${
@@ -60,14 +62,16 @@ export const SharePosterModal: React.FC<SharePosterModalProps> = ({
           ? `${ratio.toFixed(2)}× larger than`
           : `${(ratio * 100).toFixed(0)}% the size of`
       } ${t.name}\n` +
-      `• Population: ${(d.population / 1e6).toFixed(1)}M vs ${(
-        t.population / 1e6
-      ).toFixed(1)}M\n` +
-      `• Nominal GDP: $${d.gdpNominalB}B vs $${t.gdpNominalB}B\n` +
-      `• What-If Density: At ${t.name}'s density, ${d.name} would hold ${(
-        (d.areaKm2 * (t.population / t.areaKm2)) /
-        1e6
-      ).toFixed(1)}M people!\n` +
+      (statsAreCurated
+        ? `• Population: ${(d.population / 1e6).toFixed(1)}M vs ${(
+            t.population / 1e6
+          ).toFixed(1)}M\n` +
+          `• Nominal GDP: $${d.gdpNominalB}B vs $${t.gdpNominalB}B\n` +
+          `• What-If Density: At ${t.name}'s density, ${d.name} would hold ${(
+            (d.areaKm2 * (t.population / t.areaKm2)) /
+            1e6
+          ).toFixed(1)}M people!\n`
+        : `• Other vital figures are estimated for at least one country and are omitted.\n`) +
       `Explore on 3D Globe: ${shareUrl}`
     : `🌍 Exploring ${d.flag} ${d.name} (${d.areaKm2.toLocaleString()} km²) on Kuson Globe Compare 3D! ${shareUrl}`;
 
@@ -156,6 +160,11 @@ export const SharePosterModal: React.FC<SharePosterModalProps> = ({
       b >= 1000 ? `$${(b / 1000).toFixed(2)}T` : `$${b.toFixed(1)}B`;
 
     // Vital Statistics Comparison Table
+    const shown = (estimated: boolean, text: string) =>
+      estimated ? 'Estimated' : text;
+    const dEstimated = d.dataQuality === 'estimated';
+    const tEstimated = t?.dataQuality === 'estimated';
+
     const rows = t
       ? [
           [
@@ -165,32 +174,51 @@ export const SharePosterModal: React.FC<SharePosterModalProps> = ({
           ],
           [
             'Total Population',
-            `${(d.population / 1e6).toFixed(2)}M`,
-            `${(t.population / 1e6).toFixed(2)}M`,
+            shown(dEstimated, `${(d.population / 1e6).toFixed(2)}M`),
+            shown(Boolean(tEstimated), `${(t.population / 1e6).toFixed(2)}M`),
           ],
           [
             'Pop. Density',
-            `${Math.round(d.population / d.areaKm2)} /km²`,
-            `${Math.round(t.population / t.areaKm2)} /km²`,
+            shown(dEstimated, `${Math.round(d.population / d.areaKm2)} /km²`),
+            shown(
+              Boolean(tEstimated),
+              `${Math.round(t.population / t.areaKm2)} /km²`
+            ),
           ],
-          ['Nominal GDP', fmtGdp(d.gdpNominalB), fmtGdp(t.gdpNominalB)],
+          [
+            'Nominal GDP',
+            shown(dEstimated, fmtGdp(d.gdpNominalB)),
+            shown(Boolean(tEstimated), fmtGdp(t.gdpNominalB)),
+          ],
           [
             'GDP per Capita',
-            `$${d.gdpPerCapita.toLocaleString()}`,
-            `$${t.gdpPerCapita.toLocaleString()}`,
+            shown(dEstimated, `$${d.gdpPerCapita.toLocaleString()}`),
+            shown(Boolean(tEstimated), `$${t.gdpPerCapita.toLocaleString()}`),
           ],
-          ['Human Dev. Index', d.hdi.toFixed(3), t.hdi.toFixed(3)],
+          [
+            'Human Dev. Index',
+            shown(dEstimated, d.hdi.toFixed(3)),
+            shown(Boolean(tEstimated), t.hdi.toFixed(3)),
+          ],
           [
             'Highest Elevation',
-            `${d.highestPeakM}m`,
-            `${t.highestPeakM}m`,
+            shown(dEstimated, `${d.highestPeakM}m`),
+            shown(Boolean(tEstimated), `${t.highestPeakM}m`),
           ],
         ]
       : [
           ['Land Surface Area', `${d.areaKm2.toLocaleString()} km²`, '—'],
-          ['Total Population', `${(d.population / 1e6).toFixed(2)}M`, '—'],
-          ['Nominal GDP', fmtGdp(d.gdpNominalB), '—'],
-          ['GDP per Capita', `$${d.gdpPerCapita.toLocaleString()}`, '—'],
+          [
+            'Total Population',
+            shown(dEstimated, `${(d.population / 1e6).toFixed(2)}M`),
+            '—',
+          ],
+          ['Nominal GDP', shown(dEstimated, fmtGdp(d.gdpNominalB)), '—'],
+          [
+            'GDP per Capita',
+            shown(dEstimated, `$${d.gdpPerCapita.toLocaleString()}`),
+            '—',
+          ],
         ];
 
     let rowY = cardY + 240;
@@ -244,12 +272,13 @@ export const SharePosterModal: React.FC<SharePosterModalProps> = ({
 
     ctx.fillStyle = '#e2e8f0';
     ctx.font = '500 15px Inter, system-ui, sans-serif';
-    const insightLine1 = t
-      ? `At ${t.name}’s density, ${d.name} would hold ${(
-          (d.areaKm2 * (t.population / t.areaKm2)) /
-          1e6
-        ).toFixed(1)} million people!`
-      : `${d.name} spans ${d.areaKm2.toLocaleString()} km² with zero spherical distortion.`;
+    const insightLine1 =
+      t && d.dataQuality !== 'estimated' && t.dataQuality !== 'estimated'
+        ? `At ${t.name}’s density, ${d.name} would hold ${(
+            (d.areaKm2 * (t.population / t.areaKm2)) /
+            1e6
+          ).toFixed(1)} million people!`
+        : `${d.name} covers ${d.areaKm2.toLocaleString()} km² on the sphere.`;
     const insightLine2 = `At ${Math.abs(targetLat).toFixed(1)}°${
       targetLat >= 0 ? 'N' : 'S'
     }, a flat Web Mercator map inflates apparent area by ${merc.areaFactor.toFixed(

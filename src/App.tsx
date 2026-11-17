@@ -16,6 +16,7 @@ import {
   Search,
   ChevronRight,
   HelpCircle,
+  Grid3x3,
 } from 'lucide-react';
 import {
   GLOBE_LAYERS,
@@ -106,6 +107,9 @@ export const App: React.FC = () => {
   const [showDragPicker, setShowDragPicker] = useState<boolean>(false);
   const [flySearchQuery, setFlySearchQuery] = useState<string>('');
   const [showFlyPicker, setShowFlyPicker] = useState<boolean>(false);
+  const [secondarySearchQuery, setSecondarySearchQuery] = useState<string>('');
+  const [showSecondaryPicker, setShowSecondaryPicker] = useState<boolean>(false);
+  const [mobileDockOpen, setMobileDockOpen] = useState<boolean>(false);
   const [activePresetInsight, setActivePresetInsight] = useState<string | null>(
     COMPARISON_PRESETS[0].insight
   );
@@ -167,21 +171,32 @@ export const App: React.FC = () => {
     };
   }, [secondaryCountryId, allCountries, targetLng, targetLat]);
 
-  // Keyboard shortcuts (R to rotate +15 deg, Space to toggle orbit, Esc to close modals)
+  // Keyboard: R rotates, Space toggles orbit, G toggles graticule, Esc closes overlays
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (
-        document.activeElement?.tagName === 'INPUT' ||
-        document.activeElement?.tagName === 'SELECT'
-      ) {
+      const tag = document.activeElement?.tagName;
+      if (e.key === 'Escape') {
+        setShowDragPicker(false);
+        setShowFlyPicker(false);
+        setShowSecondaryPicker(false);
+        setIsShareOpen(false);
+        setMobileDockOpen(false);
+        if (tag === 'INPUT' || tag === 'TEXTAREA') {
+          (document.activeElement as HTMLElement | null)?.blur();
+        }
+        return;
+      }
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
         return;
       }
       if (e.key === 'r' || e.key === 'R') {
         setRotationDeg((prev) => (prev + (e.shiftKey ? 345 : 15)) % 360);
-      } else if (e.key === 'Escape') {
-        setShowDragPicker(false);
-        setShowFlyPicker(false);
-        setIsShareOpen(false);
+      } else if (e.key === 'g' || e.key === 'G') {
+        setShowGraticule((prev) => !prev);
+      } else if (e.key === ' ' || e.code === 'Space') {
+        if (tag === 'BUTTON' || tag === 'A') return;
+        e.preventDefault();
+        setAutoRotate((prev) => !prev);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -266,6 +281,17 @@ export const App: React.FC = () => {
     );
   }, [allCountries, flySearchQuery]);
 
+  const filteredSecondaryCountries = useMemo(() => {
+    const q = secondarySearchQuery.trim().toLowerCase();
+    const pool = allCountries.filter((c) => c.id !== draggedCountry.id);
+    if (!q) return pool;
+    return pool.filter(
+      (c) =>
+        c.stats.name.toLowerCase().includes(q) ||
+        c.stats.iso3.toLowerCase().includes(q)
+    );
+  }, [allCountries, secondarySearchQuery, draggedCountry.id]);
+
   const quickPickCountryIds = ['764', '392', '826', '840', '250', '304', '360', '152'];
 
   return (
@@ -298,12 +324,31 @@ export const App: React.FC = () => {
         />
       </div>
 
+      {!mobileDockOpen && (
+        <button
+          type="button"
+          onClick={() => setMobileDockOpen(true)}
+          className="md:hidden fixed top-3 left-3 z-30 px-3 py-2 rounded-xl glass-panel text-xs font-semibold text-amber-200"
+        >
+          Countries
+        </button>
+      )}
+
       {/* LEFT COMMAND DOCK (Pinned cleanly between top-3 and bottom bar) */}
       <div
         className={`fixed top-3 left-3 ${
           layer === 'choropleth' ? 'bottom-28' : 'bottom-20'
-        } z-20 w-[355px] xl:w-[378px] hidden md:flex flex-col gap-2.5 pointer-events-auto overflow-y-auto pr-1 transition-all`}
+        } z-20 w-[355px] xl:w-[378px] ${
+          mobileDockOpen ? 'flex' : 'hidden'
+        } md:flex flex-col gap-2.5 pointer-events-auto overflow-y-auto pr-1 transition-all`}
       >
+          <button
+            type="button"
+            onClick={() => setMobileDockOpen(false)}
+            className="md:hidden self-end px-2 py-1 text-[11px] text-slate-300"
+          >
+            Close
+          </button>
           {/* Brand Header Card */}
           <div className="glass-panel rounded-2xl p-3.5 border border-slate-700/80">
             <div className="flex items-center justify-between">
@@ -483,12 +528,12 @@ export const App: React.FC = () => {
 
                 {/* Add 2nd Comparison Country Toggle */}
                 <button
-                  onClick={() =>
-                    setSecondaryCountryId((prev) =>
-                      prev ? null : draggedCountry.id === '392' ? '826' : '392'
-                    )
-                  }
-                  title="Add a 2nd superimposed country on the globe"
+                  onClick={() => {
+                    setShowSecondaryPicker((open) => !open);
+                    setShowDragPicker(false);
+                    setShowFlyPicker(false);
+                  }}
+                  title="Choose a second superimposed country"
                   className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1 transition-all ${
                     secondaryCountryId
                       ? 'bg-pink-500/25 border-pink-400 text-pink-200'
@@ -496,8 +541,25 @@ export const App: React.FC = () => {
                   }`}
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>2nd</span>
+                  <span>
+                    {secondaryCountryId
+                      ? allCountries.find((c) => c.id === secondaryCountryId)?.stats
+                          .iso3 || '2nd'
+                      : '2nd'}
+                  </span>
                 </button>
+                {secondaryCountryId && (
+                  <button
+                    onClick={() => {
+                      setSecondaryCountryId(null);
+                      setShowSecondaryPicker(false);
+                    }}
+                    title="Remove the second country"
+                    className="px-2 py-1.5 rounded-xl border border-slate-800 text-slate-400 hover:text-slate-200"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
 
               {showFlyPicker && (
@@ -536,6 +598,42 @@ export const App: React.FC = () => {
                         </span>
                         <span className="font-mono text-[10px] text-slate-400">
                           {c.stats.capital}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {showSecondaryPicker && (
+                <div className="absolute left-0 right-0 top-full mt-1.5 z-40 glass-panel rounded-xl border border-pink-500/40 p-2 shadow-2xl max-h-60 flex flex-col">
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 mb-2">
+                    <Search className="w-3.5 h-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={secondarySearchQuery}
+                      onChange={(e) => setSecondarySearchQuery(e.target.value)}
+                      placeholder="Second country to superimpose..."
+                      className="w-full bg-transparent text-xs text-white focus:outline-none"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="overflow-y-auto space-y-0.5">
+                    {filteredSecondaryCountries.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => {
+                          setSecondaryCountryId(c.id);
+                          setShowSecondaryPicker(false);
+                          setSecondarySearchQuery('');
+                        }}
+                        className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs text-slate-200 hover:bg-pink-500/20 text-left transition-colors"
+                      >
+                        <span>
+                          {c.stats.flag} {c.stats.name}
+                        </span>
+                        <span className="font-mono text-[10px] text-slate-400">
+                          {c.stats.iso3}
                         </span>
                       </button>
                     ))}
@@ -644,7 +742,7 @@ export const App: React.FC = () => {
         {layer === 'choropleth' && (
           <div className="pointer-events-auto mb-2 px-3 py-1.5 rounded-full glass-panel flex items-center gap-1.5 border border-emerald-500/40 shadow-lg">
             <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 mr-1">
-              Heatmap Metric:
+              Heatmap:
             </span>
             {[
               { id: 'gdpPerCapita', label: 'GDP / Capita' },
@@ -665,6 +763,9 @@ export const App: React.FC = () => {
                 {m.label}
               </button>
             ))}
+            <span className="text-[10px] text-slate-400 pl-1">
+              Neutral = no researched figure. Land Area uses the sphere.
+            </span>
           </div>
         )}
 
@@ -717,6 +818,19 @@ export const App: React.FC = () => {
             >
               <Box className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">3D Prism</span>
+            </button>
+
+            <button
+              onClick={() => setShowGraticule((v) => !v)}
+              title="Toggle latitude and longitude grid (G)"
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 border transition-all ${
+                showGraticule
+                  ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-200'
+                  : 'bg-slate-900/70 border-slate-800 text-slate-400'
+              }`}
+            >
+              <Grid3x3 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Grid</span>
             </button>
 
             <button

@@ -44,6 +44,17 @@ export interface CountryStats {
   timeZone: string;
   topExports: string[];
   funFact: string;
+  /**
+   * `estimated` profiles are synthesized for world-atlas countries that have
+   * no hand-written entry. Their spherical land area is measured. Population,
+   * GDP, HDI, peaks, coastline, and currency are not.
+   */
+  dataQuality?: 'curated' | 'estimated';
+}
+
+/** True when vital figures other than spherical land area were not researched. */
+export function isEstimatedProfile(stats: CountryStats): boolean {
+  return stats.dataQuality === 'estimated';
 }
 
 export interface ComparisonPreset {

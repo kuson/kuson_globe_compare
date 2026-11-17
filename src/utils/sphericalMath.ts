@@ -146,6 +146,24 @@ export function calculateGeodesicDistanceKm(
 }
 
 /**
+ * Initial great-circle bearing in degrees clockwise from true north.
+ * This is the flight heading, not the superimposed country's compass twist.
+ */
+export function initialBearingDeg(
+  from: [number, number],
+  to: [number, number]
+): number {
+  const φ1 = from[1] * DEG2RAD;
+  const φ2 = to[1] * DEG2RAD;
+  const Δλ = (to[0] - from[0]) * DEG2RAD;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x =
+    Math.cos(φ1) * Math.sin(φ2) -
+    Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return (Math.atan2(y, x) * RAD2DEG + 360) % 360;
+}
+
+/**
  * Compute Web Mercator linear scale factor (sec(lat)) and area inflation factor (sec^2(lat)).
  */
 export function getMercatorDistortion(latDeg: number): {
@@ -232,7 +250,8 @@ function buildFallbackStats(
     drivingSide: 'Right',
     timeZone: `UTC${centroid[0] >= 0 ? '+' : ''}${Math.round(centroid[0] / 15)}`,
     topExports: ['Agricultural Goods', 'Minerals & Energy', 'Manufactured Products', 'Services'],
-    funFact: `${name} spans approximately ${computedAreaKm2.toLocaleString()} km² centered near ${Math.abs(centroid[1]).toFixed(1)}°${centroid[1] >= 0 ? 'N' : 'S'}, ${Math.abs(centroid[0]).toFixed(1)}°${centroid[0] >= 0 ? 'E' : 'W'}.`,
+    funFact: `${name} spans approximately ${computedAreaKm2.toLocaleString()} km² centered near ${Math.abs(centroid[1]).toFixed(1)}°${centroid[1] >= 0 ? 'N' : 'S'}, ${Math.abs(centroid[0]).toFixed(1)}°${centroid[0] >= 0 ? 'E' : 'W'}. Land area is measured on the sphere. Population, income, and physical extremes shown elsewhere are not researched for this country.`,
+    dataQuality: 'estimated',
   };
 }
 

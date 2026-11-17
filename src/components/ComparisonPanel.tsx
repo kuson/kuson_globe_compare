@@ -16,11 +16,16 @@ import {
   CheckCircle2,
   XCircle,
 } from 'lucide-react';
-import { QUIZ_QUESTIONS, QuizQuestion } from '../data/countryDatabase';
+import {
+  QUIZ_QUESTIONS,
+  QuizQuestion,
+  isEstimatedProfile,
+} from '../data/countryDatabase';
 import {
   WorldCountry,
   calculateGeodesicDistanceKm,
   getMercatorDistortion,
+  initialBearingDeg,
 } from '../utils/sphericalMath';
 
 interface ComparisonPanelProps {
@@ -38,27 +43,52 @@ interface ComparisonPanelProps {
 
 type ActiveTab = 'vitals' | 'whatif' | 'nomad' | 'quiz';
 
+type CountryFeature = WorldCountry['feature'];
+
+/** Equal-Earth scale that fits one country inside a square of `size` px. */
+function equalEarthFitScale(feature: CountryFeature, size: number): number {
+  const centroid = d3.geoCentroid(feature);
+  const projection = d3
+    .geoEqualEarth()
+    .rotate([-centroid[0], -centroid[1]])
+    .fitExtent(
+      [
+        [4, 4],
+        [size - 4, size - 4],
+      ],
+      feature
+    );
+  return projection.scale();
+}
+
 /**
- * Renders a mini SVG silhouette of a country's GeoJSON feature.
+ * Renders a mini SVG silhouette. Pass the same `scale` for two countries
+ * so their areas stay in true proportion instead of each filling the box.
  */
 const CountryMiniSilhouette: React.FC<{
   country: WorldCountry;
   color: string;
   size?: number;
-}> = ({ country, color, size = 54 }) => {
+  scale?: number;
+}> = ({ country, color, size = 54, scale }) => {
   const pathData = useMemo(() => {
+    const centroid = d3.geoCentroid(country.feature);
     const projection = d3
-      .geoMercator()
-      .fitExtent(
+      .geoEqualEarth()
+      .rotate([-centroid[0], -centroid[1]]);
+    if (scale) {
+      projection.scale(scale).translate([size / 2, size / 2]);
+    } else {
+      projection.fitExtent(
         [
           [4, 4],
           [size - 4, size - 4],
         ],
         country.feature
       );
-    const pathGenerator = d3.geoPath(projection);
-    return pathGenerator(country.feature) || '';
-  }, [country, size]);
+    }
+    return d3.geoPath(projection)(country.feature) || '';
+  }, [country, size, scale]);
 
   return (
     <svg
@@ -93,10 +123,7 @@ const ComparisonRadarChart: React.FC<{
 
     const normRatio = (a: number, b: number) => {
       const max = Math.max(a, b, 0.001);
-      return [
-        Math.max(0.15, Math.min(1, a / max)),
-        Math.max(0.15, Math.min(1, b / max)),
-      ];
+      return [a / max, b / max];
     };
 
     const [dArea, tArea] = normRatio(d.areaKm2, t.areaKm2);
@@ -231,8 +258,15 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
   const [activeTab, setActiveTab] = useState<ActiveTab>('vitals');
   const [nomadBudgetUsd, setNomadBudgetUsd] = useState<number>(2500);
   const [quizIndex, setQuizIndex] = useState<number>(0);
-  const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [quizScore, setQuizScore] = useState<number>(0);
+  const [quizPicks, setQuizPicks] = useState<Array<number | null>>(() =>
+    QUIZ_QUESTIONS.map(() => null)
+  );
+  const selectedOption = quizPicks[quizIndex] ?? null;
+  const quizScore = quizPicks.reduce<number>(
+    (score, pick, index) =>
+      score + (pick === QUIZ_QUESTIONS[index].correctIndex ? 1 : 0),
+    0
+  );
 
   const dStats = draggedCountry.stats;
   const tStats = targetCountry?.stats || null;
@@ -250,6 +284,23 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
     [draggedCountry, targetLng, targetLat]
   );
 
+  const flightBearingDeg = useMemo(
+    () =>
+      initialBearingDeg(draggedCountry.centroid, [targetLng, targetLat]),
+    [draggedCountry, targetLng, targetLat]
+  );
+
+  const sharedIconScale = useMemo(() => {
+    const size = 44;
+    const dragScale = equalEarthFitScale(draggedCountry.feature, size);
+    if (!targetCountry) return dragScale;
+    return Math.min(dragScale, equalEarthFitScale(targetCountry.feature, size));
+  }, [draggedCountry, targetCountry]);
+
+  const draggedEstimated = isEstimatedProfile(dStats);
+  const targetEstimated = tStats ? isEstimatedProfile(tStats) : false;
+  const bothCurated = Boolean(tStats) && !draggedEstimated && !targetEstimated;
+
   const homeMercator = useMemo(
     () => getMercatorDistortion(draggedCountry.centroid[1]),
     [draggedCountry]
@@ -260,6 +311,8 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
   );
   const mercatorAreaInflationVsHome =
     currentMercator.areaFactor / Math.max(0.1, homeMercator.areaFactor);
+  const mercatorLinearVsHome =
+    currentMercator.linearFactor / Math.max(0.1, homeMercator.linearFactor);
 
   const dDensity = dStats.population / Math.max(1, dStats.areaKm2);
   const tDensity = tStats
@@ -285,7 +338,12 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
         <div className="flex items-center justify-between gap-2">
           {/* Dragged Nation */}
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            <CountryMiniSilhouette country={draggedCountry} color="#fbbf24" size={44} />
+            <CountryMiniSilhouette
+              country={draggedCountry}
+              color="#fbbf24"
+              size={44}
+              scale={sharedIconScale}
+            />
             <div className="min-w-0">
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
                 Superimposed
@@ -293,6 +351,11 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
               <h2 className="text-sm font-bold text-white leading-tight mt-0.5">
                 {dStats.flag} {dStats.name}
               </h2>
+              {draggedEstimated && (
+                <p className="text-[10px] uppercase tracking-wider text-slate-400">
+                  Area measured · other figures estimated
+                </p>
+              )}
               <p className="text-[11px] font-mono text-amber-300/90">
                 {dStats.areaKm2.toLocaleString()} km²
               </p>
@@ -346,6 +409,11 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                   <h2 className="text-sm font-bold text-white leading-tight mt-0.5">
                     {tStats.flag} {tStats.name}
                   </h2>
+                  {targetEstimated && (
+                    <p className="text-[10px] uppercase tracking-wider text-slate-400">
+                      Area measured · other figures estimated
+                    </p>
+                  )}
                   <p className="text-[11px] font-mono text-emerald-300/90">
                     {tStats.areaKm2.toLocaleString()} km²
                   </p>
@@ -354,6 +422,7 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                   country={targetCountry}
                   color="#10b981"
                   size={44}
+                  scale={sharedIconScale}
                 />
               </>
             ) : (
@@ -467,116 +536,184 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
 
                 {/* Proportional Head-to-Head Metric Bars */}
                 <div className="space-y-2.5">
-                  {[
+                  {([
                     {
                       label: 'Land Surface Area',
                       dText: `${dStats.areaKm2.toLocaleString()} km²`,
                       tText: `${tStats.areaKm2.toLocaleString()} km²`,
-                      dVal: dStats.areaKm2,
-                      tVal: tStats.areaKm2,
-                      unit: 'km²',
+                      dVal: dStats.areaKm2 as number | null,
+                      tVal: tStats.areaKm2 as number | null,
+                      mode: 'share' as const,
+                      scaleMax: 1,
                     },
                     {
                       label: 'Total Population',
-                      dText: formatPop(dStats.population),
-                      tText: formatPop(tStats.population),
-                      dVal: dStats.population,
-                      tVal: tStats.population,
-                      unit: 'people',
+                      dText: draggedEstimated ? 'Estimated' : formatPop(dStats.population),
+                      tText: targetEstimated ? 'Estimated' : formatPop(tStats.population),
+                      dVal: draggedEstimated ? null : dStats.population,
+                      tVal: targetEstimated ? null : tStats.population,
+                      mode: 'share' as const,
+                      scaleMax: 1,
                     },
                     {
                       label: 'Population Density',
-                      dText: `${Math.round(dDensity).toLocaleString()} /km²`,
-                      tText: `${Math.round(tDensity).toLocaleString()} /km²`,
-                      dVal: dDensity,
-                      tVal: tDensity,
-                      unit: '/km²',
+                      dText: draggedEstimated
+                        ? 'Estimated'
+                        : `${Math.round(dDensity).toLocaleString()} /km²`,
+                      tText: targetEstimated
+                        ? 'Estimated'
+                        : `${Math.round(tDensity).toLocaleString()} /km²`,
+                      dVal: draggedEstimated ? null : dDensity,
+                      tVal: targetEstimated ? null : tDensity,
+                      mode: 'share' as const,
+                      scaleMax: 1,
                     },
                     {
                       label: 'Nominal GDP',
-                      dText: formatGdp(dStats.gdpNominalB),
-                      tText: formatGdp(tStats.gdpNominalB),
-                      dVal: dStats.gdpNominalB,
-                      tVal: tStats.gdpNominalB,
-                      unit: 'USD',
+                      dText: draggedEstimated ? 'Estimated' : formatGdp(dStats.gdpNominalB),
+                      tText: targetEstimated ? 'Estimated' : formatGdp(tStats.gdpNominalB),
+                      dVal: draggedEstimated ? null : dStats.gdpNominalB,
+                      tVal: targetEstimated ? null : tStats.gdpNominalB,
+                      mode: 'share' as const,
+                      scaleMax: 1,
                     },
                     {
                       label: 'GDP (Purchasing Power PPP)',
-                      dText: formatGdp(dStats.gdpPppB),
-                      tText: formatGdp(tStats.gdpPppB),
-                      dVal: dStats.gdpPppB,
-                      tVal: tStats.gdpPppB,
-                      unit: 'PPP',
+                      dText: draggedEstimated ? 'Estimated' : formatGdp(dStats.gdpPppB),
+                      tText: targetEstimated ? 'Estimated' : formatGdp(tStats.gdpPppB),
+                      dVal: draggedEstimated ? null : dStats.gdpPppB,
+                      tVal: targetEstimated ? null : tStats.gdpPppB,
+                      mode: 'share' as const,
+                      scaleMax: 1,
                     },
                     {
                       label: 'GDP per Capita (Nominal)',
-                      dText: `$${dStats.gdpPerCapita.toLocaleString()}`,
-                      tText: `$${tStats.gdpPerCapita.toLocaleString()}`,
-                      dVal: dStats.gdpPerCapita,
-                      tVal: tStats.gdpPerCapita,
-                      unit: 'USD',
+                      dText: draggedEstimated
+                        ? 'Estimated'
+                        : `$${dStats.gdpPerCapita.toLocaleString()}`,
+                      tText: targetEstimated
+                        ? 'Estimated'
+                        : `$${tStats.gdpPerCapita.toLocaleString()}`,
+                      dVal: draggedEstimated ? null : dStats.gdpPerCapita,
+                      tVal: targetEstimated ? null : tStats.gdpPerCapita,
+                      mode: 'share' as const,
+                      scaleMax: 1,
                     },
                     {
                       label: 'Human Development Index (HDI)',
-                      dText: dStats.hdi.toFixed(3),
-                      tText: tStats.hdi.toFixed(3),
-                      dVal: dStats.hdi,
-                      tVal: tStats.hdi,
-                      unit: 'idx',
+                      dText: draggedEstimated ? 'Estimated' : dStats.hdi.toFixed(3),
+                      tText: targetEstimated ? 'Estimated' : tStats.hdi.toFixed(3),
+                      dVal: draggedEstimated ? null : dStats.hdi,
+                      tVal: targetEstimated ? null : tStats.hdi,
+                      mode: 'scale' as const,
+                      scaleMax: 1,
                     },
                     {
-                      label: 'Life Expectancy / Median Age',
-                      dText: `${dStats.lifeExpectancy}y (Med ${dStats.medianAge}y)`,
-                      tText: `${tStats.lifeExpectancy}y (Med ${tStats.medianAge}y)`,
-                      dVal: dStats.lifeExpectancy,
-                      tVal: tStats.lifeExpectancy,
-                      unit: 'yrs',
+                      label: 'Life Expectancy',
+                      dText: draggedEstimated
+                        ? 'Estimated'
+                        : `${dStats.lifeExpectancy}y (Med ${dStats.medianAge}y)`,
+                      tText: targetEstimated
+                        ? 'Estimated'
+                        : `${tStats.lifeExpectancy}y (Med ${tStats.medianAge}y)`,
+                      dVal: draggedEstimated ? null : dStats.lifeExpectancy,
+                      tVal: targetEstimated ? null : tStats.lifeExpectancy,
+                      mode: 'scale' as const,
+                      scaleMax: 100,
                     },
                     {
                       label: 'Highest Peak Elevation',
-                      dText: `${dStats.highestPeakM.toLocaleString()}m (${dStats.highestPeakName})`,
-                      tText: `${tStats.highestPeakM.toLocaleString()}m (${tStats.highestPeakName})`,
-                      dVal: dStats.highestPeakM,
-                      tVal: tStats.highestPeakM,
-                      unit: 'm',
+                      dText: draggedEstimated
+                        ? 'Estimated'
+                        : `${dStats.highestPeakM.toLocaleString()}m (${dStats.highestPeakName})`,
+                      tText: targetEstimated
+                        ? 'Estimated'
+                        : `${tStats.highestPeakM.toLocaleString()}m (${tStats.highestPeakName})`,
+                      dVal: draggedEstimated ? null : dStats.highestPeakM,
+                      tVal: targetEstimated ? null : tStats.highestPeakM,
+                      mode: 'share' as const,
+                      scaleMax: 1,
                     },
                     {
-                      label: 'Coastline & Forest Cover',
-                      dText: `${dStats.coastlineKm.toLocaleString()} km • ${dStats.forestPct}% forest`,
-                      tText: `${tStats.coastlineKm.toLocaleString()} km • ${tStats.forestPct}% forest`,
-                      dVal: dStats.coastlineKm + 100,
-                      tVal: tStats.coastlineKm + 100,
-                      unit: 'km',
+                      label: 'Coastline',
+                      dText: draggedEstimated
+                        ? 'Estimated'
+                        : `${dStats.coastlineKm.toLocaleString()} km`,
+                      tText: targetEstimated
+                        ? 'Estimated'
+                        : `${tStats.coastlineKm.toLocaleString()} km`,
+                      dVal: draggedEstimated ? null : dStats.coastlineKm,
+                      tVal: targetEstimated ? null : tStats.coastlineKm,
+                      mode: 'share' as const,
+                      scaleMax: 1,
                     },
-                  ].map((row) => {
-                    const total = Math.max(0.0001, row.dVal + row.tVal);
-                    const dPct = Math.max(8, Math.min(92, (row.dVal / total) * 100));
+                    {
+                      label: 'Forest Cover',
+                      dText: draggedEstimated ? 'Estimated' : `${dStats.forestPct}%`,
+                      tText: targetEstimated ? 'Estimated' : `${tStats.forestPct}%`,
+                      dVal: draggedEstimated ? null : dStats.forestPct,
+                      tVal: targetEstimated ? null : tStats.forestPct,
+                      mode: 'scale' as const,
+                      scaleMax: 100,
+                    },
+                  ]).map((row) => {
+                    const bothKnown = row.dVal != null && row.tVal != null;
+                    const sharePct =
+                      row.mode === 'share' && bothKnown
+                        ? (row.dVal! / Math.max(0.0001, row.dVal! + row.tVal!)) * 100
+                        : 0;
                     return (
                       <div
                         key={row.label}
                         className="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800/80"
                       >
-                        <div className="flex items-center justify-between text-[11px] mb-1">
-                          <span className="font-mono font-semibold text-amber-300">
+                        <div className="flex items-center justify-between text-[11px] mb-1 gap-2">
+                          <span className="font-mono font-semibold text-amber-300 text-left">
                             {row.dText}
                           </span>
-                          <span className="text-slate-400 font-medium">
+                          <span className="text-slate-400 font-medium text-center">
                             {row.label}
                           </span>
-                          <span className="font-mono font-semibold text-emerald-300">
+                          <span className="font-mono font-semibold text-emerald-300 text-right">
                             {row.tText}
                           </span>
                         </div>
-                        <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden flex">
-                          <div
-                            className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-300"
-                            style={{ width: `${dPct}%` }}
-                          />
-                          <div
-                            className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all duration-300"
-                            style={{ width: `${100 - dPct}%` }}
-                          />
-                        </div>
+                        {row.mode === 'share' && bothKnown && (
+                          <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden flex">
+                            <div
+                              className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-300"
+                              style={{ width: `${sharePct}%` }}
+                            />
+                            <div
+                              className="h-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all duration-300"
+                              style={{ width: `${100 - sharePct}%` }}
+                            />
+                          </div>
+                        )}
+                        {row.mode === 'scale' && (
+                          <div className="space-y-1">
+                            {row.dVal != null && (
+                              <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                <div
+                                  className="h-full bg-amber-400"
+                                  style={{
+                                    width: `${Math.max(0, Math.min(100, (row.dVal / row.scaleMax) * 100))}%`,
+                                  }}
+                                />
+                              </div>
+                            )}
+                            {row.tVal != null && (
+                              <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                                <div
+                                  className="h-full bg-emerald-400"
+                                  style={{
+                                    width: `${Math.max(0, Math.min(100, (row.tVal / row.scaleMax) * 100))}%`,
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -651,41 +788,40 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                 )!
               </p>
 
-              {/* Visual 3D True Sphere vs 2D Flat Mercator Box Comparison */}
-              <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="grid grid-cols-2 gap-2 pt-1 items-end">
                 <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 flex flex-col items-center">
                   <span className="text-[10px] text-slate-400 mb-1">
-                    True 3D Globe Area
+                    True spherical outline
                   </span>
-                  <div className="w-11 h-11 rounded-lg bg-amber-400/25 border-2 border-amber-400 flex items-center justify-center font-mono text-xs font-bold text-amber-200">
-                    1.00×
-                  </div>
+                  <CountryMiniSilhouette
+                    country={draggedCountry}
+                    color="#fbbf24"
+                    size={44}
+                  />
+                  <span className="font-mono text-[10px] text-amber-200 mt-1">1.00×</span>
                 </div>
                 <div className="p-2.5 rounded-lg bg-slate-950/70 border border-slate-800 flex flex-col items-center">
                   <span className="text-[10px] text-slate-400 mb-1">
-                    Flat Mercator at {Math.abs(targetLat).toFixed(0)}°
+                    Mercator outline at {Math.abs(targetLat).toFixed(0)}°
                   </span>
-                  <div
-                    className="rounded-lg bg-sky-400/25 border-2 border-dashed border-sky-400 flex items-center justify-center font-mono text-xs font-bold text-sky-200 transition-all"
-                    style={{
-                      width: `${Math.min(
-                        76,
-                        Math.max(28, 44 * currentMercator.linearFactor)
-                      )}px`,
-                      height: `${Math.min(
-                        76,
-                        Math.max(28, 44 * currentMercator.linearFactor)
-                      )}px`,
-                    }}
-                  >
-                    {mercatorAreaInflationVsHome.toFixed(2)}×
-                  </div>
+                  <CountryMiniSilhouette
+                    country={draggedCountry}
+                    color="#38bdf8"
+                    size={Math.min(84, Math.max(44, Math.round(44 * mercatorLinearVsHome)))}
+                    scale={
+                      equalEarthFitScale(draggedCountry.feature, 44) *
+                      mercatorLinearVsHome
+                    }
+                  />
+                  <span className="font-mono text-[10px] text-sky-200 mt-1">
+                    {mercatorAreaInflationVsHome.toFixed(2)}× area
+                  </span>
                 </div>
               </div>
             </div>
 
             {/* Counterfactual Simulation Cards */}
-            {tStats ? (
+            {tStats && bothCurated ? (
               <>
                 <div className="p-3.5 rounded-xl bg-slate-900/75 border border-amber-500/30 space-y-1.5">
                   <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
@@ -744,6 +880,12 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                   </p>
                 </div>
               </>
+            ) : tStats ? (
+              <p className="text-xs text-slate-400 text-center py-4">
+                Population and income for an unresearched country are estimated,
+                so the density and GDP swaps stay hidden. Land area on the globe
+                is still measured.
+              </p>
             ) : (
               <p className="text-xs text-slate-400 text-center py-4">
                 Place {dStats.name} over a country to unlock live What-If
@@ -775,25 +917,32 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                   </div>
                 </div>
                 <div className="p-2 rounded-lg bg-slate-950/70 border border-slate-800/80">
-                  <div className="text-[10px] text-slate-400">Bearing</div>
+                  <div className="text-[10px] text-slate-400">Initial heading</div>
                   <div className="text-xs font-mono font-bold text-sky-300 mt-0.5">
-                    {rotationDeg}° Rotated
+                    {flightBearingDeg.toFixed(0)}°
                   </div>
                 </div>
                 <div className="p-2 rounded-lg bg-slate-950/70 border border-slate-800/80">
                   <div className="text-[10px] text-slate-400">Avg Temp Diff</div>
                   <div className="text-xs font-mono font-bold text-emerald-300 mt-0.5">
-                    {tStats
-                      ? `${dStats.avgTempC} vs ${tStats.avgTempC}°C`
-                      : `${dStats.avgTempC}°C`}
+                    {!tStats
+                      ? draggedEstimated
+                        ? 'Estimated'
+                        : `${dStats.avgTempC}°C`
+                      : draggedEstimated || targetEstimated
+                      ? 'Estimated'
+                      : `${dStats.avgTempC} vs ${tStats.avgTempC}°C`}
                   </div>
                 </div>
               </div>
+              <p className="text-[10px] text-slate-500 px-1">
+                Initial heading is the great-circle flight from home. Compass twist of the overlay is {rotationDeg}°.
+              </p>
             </div>
 
             {tStats && (
               <>
-                {/* Interactive PPP / Cost of Living Calculator */}
+                {bothCurated ? (
                 <div className="p-3.5 rounded-xl bg-gradient-to-br from-emerald-950/40 to-slate-900/90 border border-emerald-500/30 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-emerald-300">
@@ -833,6 +982,12 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                     {tStats.costOfLivingIndex}).
                   </p>
                 </div>
+                ) : (
+                  <p className="text-xs text-slate-400 text-center py-2">
+                    Cost-of-living equivalence needs two researched profiles.
+                    Distance and heading above still use the sphere.
+                  </p>
+                )}
 
                 {/* Practical Travel & Expat Matrix */}
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -842,15 +997,17 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                     </div>
                     <div className="text-slate-300">
                       <span className="text-slate-500">Capital:</span>{' '}
-                      {dStats.capital}
+                      {draggedEstimated ? 'Estimated' : dStats.capital}
                     </div>
                     <div className="text-slate-300">
                       <span className="text-slate-500">Currency:</span>{' '}
-                      {dStats.currency}
+                      {draggedEstimated ? 'Estimated' : dStats.currency}
                     </div>
                     <div className="text-slate-300">
                       <span className="text-slate-500">Drives on:</span>{' '}
-                      {dStats.drivingSide} • {dStats.timeZone}
+                      {draggedEstimated
+                        ? 'Estimated'
+                        : `${dStats.drivingSide} • ${dStats.timeZone}`}
                     </div>
                   </div>
 
@@ -860,15 +1017,17 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                     </div>
                     <div className="text-slate-300">
                       <span className="text-slate-500">Capital:</span>{' '}
-                      {tStats.capital}
+                      {targetEstimated ? 'Estimated' : tStats.capital}
                     </div>
                     <div className="text-slate-300">
                       <span className="text-slate-500">Currency:</span>{' '}
-                      {tStats.currency}
+                      {targetEstimated ? 'Estimated' : tStats.currency}
                     </div>
                     <div className="text-slate-300">
                       <span className="text-slate-500">Drives on:</span>{' '}
-                      {tStats.drivingSide} • {tStats.timeZone}
+                      {targetEstimated
+                        ? 'Estimated'
+                        : `${tStats.drivingSide} • ${tStats.timeZone}`}
                     </div>
                   </div>
                 </div>
@@ -879,7 +1038,8 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                     Signature Economic & Export Pillars
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    {dStats.topExports.map((exp) => (
+                    {!draggedEstimated &&
+                      dStats.topExports.map((exp) => (
                       <span
                         key={exp}
                         className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-200 border border-amber-500/30 text-[10px]"
@@ -887,7 +1047,8 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                         {dStats.flag} {exp}
                       </span>
                     ))}
-                    {tStats.topExports.map((exp) => (
+                    {!targetEstimated &&
+                      tStats.topExports.map((exp) => (
                       <span
                         key={exp}
                         className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-200 border border-emerald-500/30 text-[10px]"
@@ -949,10 +1110,12 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                           key={opt}
                           disabled={selectedOption !== null}
                           onClick={() => {
-                            setSelectedOption(idx);
-                            if (idx === q.correctIndex) {
-                              setQuizScore((s) => s + 1);
-                            }
+                            setQuizPicks((prev) => {
+                              if (prev[quizIndex] !== null) return prev;
+                              const next = [...prev];
+                              next[quizIndex] = idx;
+                              return next;
+                            });
                             onSelectQuizPreset(q);
                           }}
                           className={`w-full text-left p-2.5 rounded-xl border text-xs font-medium flex items-center justify-between transition-all ${btnStyle}`}
@@ -976,14 +1139,18 @@ export const ComparisonPanel: React.FC<ComparisonPanelProps> = ({
                       </p>
                       <button
                         onClick={() => {
-                          setSelectedOption(null);
-                          setQuizIndex(
-                            (prev) => (prev + 1) % QUIZ_QUESTIONS.length
-                          );
+                          if (quizIndex < QUIZ_QUESTIONS.length - 1) {
+                            setQuizIndex((prev) => prev + 1);
+                            return;
+                          }
+                          setQuizPicks(QUIZ_QUESTIONS.map(() => null));
+                          setQuizIndex(0);
                         }}
                         className="w-full py-1.5 rounded-lg bg-amber-400 text-slate-950 font-bold text-xs hover:bg-amber-300 transition-colors"
                       >
-                        Next Challenge →
+                        {quizIndex < QUIZ_QUESTIONS.length - 1
+                          ? 'Next Challenge →'
+                          : 'Restart quiz'}
                       </button>
                     </div>
                   )}

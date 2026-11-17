@@ -462,6 +462,7 @@ export function generateGlobeLayerTexture(
 
     // Mid-elevation upland wash
     for (const c of countries) {
+      if (c.stats.dataQuality === 'estimated') continue;
       ctx.beginPath();
       path(c.feature);
       const peak = c.stats.highestPeakM;
@@ -600,7 +601,7 @@ export function generateGlobeLayerTexture(
 
     // Also illuminate every country's capital / centroid proportional to urban population
     for (const c of countries) {
-      if (c.id === '010') continue;
+      if (c.id === '010' || c.stats.dataQuality === 'estimated') continue;
       const [cx, cy] = lngLatToPixel(c.stats.capitalCoords[0], c.stats.capitalCoords[1]);
       const popFactor = Math.min(1, Math.log10(Math.max(100000, c.stats.population)) / 8.5);
       const r = 6 + popFactor * 14;
@@ -636,7 +637,9 @@ export function generateGlobeLayerTexture(
     for (const c of countries) {
       ctx.beginPath();
       path(c.feature);
-      if (c.id === '010') {
+      const uncuratedStat =
+        choroplethMetric !== 'areaKm2' && c.stats.dataQuality === 'estimated';
+      if (c.id === '010' || uncuratedStat) {
         ctx.fillStyle = '#1e293b';
       } else {
         const norm = getChoroplethNormalizedValue(c, choroplethMetric);
