@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/components/ComparisonPanel.tsx","./src/components/Globe3D.tsx","./src/components/SharePosterModal.tsx","./src/data/countryDatabase.ts","./src/utils/globeTextures.ts","./src/utils/sphericalMath.ts"],"version":"5.6.3"}
